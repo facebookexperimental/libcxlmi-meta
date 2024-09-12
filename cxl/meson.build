@@ -7,7 +7,8 @@ sources = [
 ]
 
 deps = [
-    libcxlmi_dep
+    libcxlmi_dep,
+    libvendor_meta_dep,
 ]
 
 executable(
