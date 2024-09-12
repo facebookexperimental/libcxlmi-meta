@@ -140,7 +140,7 @@ add_project_arguments(
     ],
     language : 'c',
 )
-inc = include_directories(['libcxlmi/ccan', 'libcxlmi/src', '.'])
+inc = include_directories(['libcxlmi/ccan', 'libcxlmi/src', '.', 'vendor_meta/inc'])
 
 ################################################################################
 config_h = configure_file(
@@ -164,6 +164,7 @@ add_project_arguments(
 
 subdir('libcxlmi/ccan')
 subdir('libcxlmi/src')
+subdir('vendor_meta')
 
 ################################################################################
 if meson.version().version_compare('>=0.53.0')
