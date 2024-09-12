@@ -165,6 +165,7 @@ add_project_arguments(
 subdir('libcxlmi/ccan')
 subdir('libcxlmi/src')
 subdir('vendor_meta')
+subdir('cxl')
 
 ################################################################################
 if meson.version().version_compare('>=0.53.0')
