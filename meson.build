@@ -140,7 +140,7 @@ add_project_arguments(
     ],
     language : 'c',
 )
-inc = include_directories(['libcxlmi/ccan', 'libcxlmi/src', '.', 'vendor_meta/inc'])
+inc = include_directories(['libcxlmi/ccan', 'libcxlmi/src', '.', 'vendor_meta/inc', 'vendor_util/inc'])
 
 ################################################################################
 config_h = configure_file(
@@ -165,6 +165,7 @@ add_project_arguments(
 subdir('libcxlmi/ccan')
 subdir('libcxlmi/src')
 subdir('vendor_meta')
+subdir('vendor_util')
 subdir('cxl')
 
 ################################################################################
