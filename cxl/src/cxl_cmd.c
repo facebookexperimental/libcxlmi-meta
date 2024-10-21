@@ -4,6 +4,7 @@
 #include <errno.h>
 
 /* libcxlmi includes */
+#include <ccan/endian/endian.h>
 #include <libcxlmi.h>
 
 /* vendor includes */
@@ -16,6 +17,11 @@
 /* Length of UUID in bytes */
 #define LOG_UUID_LEN 0x10
 
+#define member_size(type, member) (sizeof(((type *)0)->member))
+#define CXL_MAX_RECORDS_TO_DUMP 20
+#define CXL_DRAM_EVENT_GUID "601dcbb3-9c06-4eab-b8af-4e9bfb5c9624"
+#define CXL_MEM_MODULE_EVENT_GUID "fe927475-dd59-4339-a586-79bab113b774"
+
 static const uint8_t cel_uuid[LOG_UUID_LEN] = {
     0x0d, 0xa9, 0xc0, 0xb5, 0xbf, 0x41, 0x4b, 0x78,
     0x8f, 0x79, 0x96, 0xb1, 0x62, 0x3b, 0x3f, 0x17};
@@ -23,6 +29,55 @@ static const uint8_t cel_uuid[LOG_UUID_LEN] = {
 static const uint8_t ven_dbg[LOG_UUID_LEN] = {
     0x5e, 0x18, 0x19, 0xd9, 0x11, 0xa9, 0x40, 0x0c,
     0x81, 0x1f, 0xd6, 0x07, 0x19, 0x40, 0x3d, 0x86};
+
+#define FW_VERSION_LEN 0x10
+
+int cxl_cmd_identify(struct cxlmi_endpoint *ep) {
+  int rc;
+  struct cxlmi_cmd_memdev_identify identify;
+
+  rc = cxlmi_cmd_memdev_identify(ep, NULL, &identify);
+  if (!rc) {
+    printf("Identify payload info: %s\n", get_devname(ep));
+    printf("    out size: 0x%lx\n", sizeof(identify));
+
+    printf("%s info\n", get_devname(ep));
+    printf("    fw revision: ");
+    for (int i = 0; i < FW_VERSION_LEN; ++i)
+      printf("%02x ", identify.fw_revision[i]);
+    printf("\n");
+    printf("    total_capacity: %lu MB (%lu GB)\n",
+           le64_to_cpu(identify.total_capacity),
+           (le64_to_cpu(identify.total_capacity)) / 4);
+    printf("    volatile_capacity: %lu MB (%lu GB)\n",
+           le64_to_cpu(identify.volatile_capacity),
+           (le64_to_cpu(identify.volatile_capacity)) / 4);
+    printf("    persistent_capacity: %lu MB (%lu GB)\n",
+           le64_to_cpu(identify.persistent_capacity),
+           (le64_to_cpu(identify.persistent_capacity)) / 4);
+    printf("    partition_align: %lu MB (%lu GB)\n",
+           le64_to_cpu(identify.partition_align),
+           (le64_to_cpu(identify.partition_align)) / 4);
+    printf("    info_event_log_size: %d\n",
+           le16_to_cpu(identify.info_event_log_size));
+    printf("    warning_event_log_size: %d\n",
+           le16_to_cpu(identify.warning_event_log_size));
+    printf("    failure_event_log_size: %d\n",
+           le16_to_cpu(identify.failure_event_log_size));
+    printf("    fatal_event_log_size: %d\n",
+           le16_to_cpu(identify.fatal_event_log_size));
+    printf("    lsa_size: %d\n", le32_to_cpu(identify.lsa_size));
+    for (int i = 0; i < 3; ++i)
+      printf("    poison_list_max_mer[%d]: %d\n", i,
+             identify.poison_list_max_mer[i]);
+    printf("    inject_poison_limit: %d\n",
+           le16_to_cpu(identify.inject_poison_limit));
+    printf("    poison_caps: %d\n", identify.poison_caps);
+    printf("    qos_telemetry_caps: %d\n", identify.qos_telemetry_caps);
+  }
+
+  return rc;
+}
 
 int cxl_cmd_get_supported_logs(struct cxlmi_endpoint *ep) {
   int rc;
@@ -177,6 +232,64 @@ int cxl_cmd_get_alert_config(struct cxlmi_endpoint *ep) {
   return rc;
 }
 
+int cxl_cmd_set_alert_config(struct cxlmi_endpoint *ep,
+                             uint32_t alert_prog_threshold,
+                             uint32_t device_temp_threshold,
+                             uint32_t mem_error_threshold) {
+  int rc;
+  struct cxlmi_cmd_memdev_set_alert_config alert_config;
+
+  alert_prog_threshold = cpu_to_be32(alert_prog_threshold);
+  device_temp_threshold = cpu_to_be32(device_temp_threshold);
+  mem_error_threshold = cpu_to_be32(mem_error_threshold);
+
+  alert_config.valid_alert_actions = ((alert_prog_threshold >> 8) & 0xff);
+  alert_config.enable_alert_actions = ((alert_prog_threshold >> 16) & 0xff);
+  alert_config.life_used_programmable_warning_threshold =
+      ((alert_prog_threshold >> 24) & 0xff);
+  alert_config.rsvd1 = 0;
+
+  alert_config.device_over_temperature_programmable_warning_threshold =
+      cpu_to_le16(be16_to_cpu(((device_temp_threshold) & 0xffff)));
+  alert_config.device_under_temperature_programmable_warning_threshold =
+      cpu_to_le16(be16_to_cpu((((device_temp_threshold) >> 16) & 0xffff)));
+
+  alert_config.corrected_volatile_mem_error_programmable_warning_threshold =
+      cpu_to_le16(be16_to_cpu((mem_error_threshold & 0xffff)));
+  alert_config.corrected_persistent_mem_error_programmable_warning_threshold =
+      cpu_to_le16(be16_to_cpu(((mem_error_threshold >> 16) & 0xffff)));
+
+  printf("alert_config settings: %s \n", get_devname(ep));
+  printf("    valid_alert_actions: 0x%x\n", alert_config.valid_alert_actions);
+  printf("    enable_alert_actions: 0x%x\n", alert_config.enable_alert_actions);
+  printf("    life_used_prog_warn_threshold: 0x%x\n",
+         alert_config.life_used_programmable_warning_threshold);
+  printf(
+      "    dev_over_temp_prog_warn_threshold: 0x%x\n",
+      le16_to_cpu(
+          alert_config.device_over_temperature_programmable_warning_threshold));
+  printf("    dev_under_temp_prog_warn_threshold: 0x%x\n",
+         le16_to_cpu(
+             alert_config
+                 .device_under_temperature_programmable_warning_threshold));
+  printf("    corr_vol_mem_err_prog_warn_thresold: 0x%x\n",
+         le16_to_cpu(
+             alert_config
+                 .corrected_volatile_mem_error_programmable_warning_threshold));
+  printf(
+      "    corr_pers_mem_err_prog_warn_threshold: 0x%x\n",
+      le16_to_cpu(
+          alert_config
+              .corrected_persistent_mem_error_programmable_warning_threshold));
+
+  rc = cxlmi_cmd_memdev_set_alert_config(ep, NULL, &alert_config);
+  if (rc)
+    return rc;
+
+  printf("command completed successfully\n");
+  return rc;
+}
+
 int cxl_cmd_get_health_info(struct cxlmi_endpoint *ep) {
   int rc;
   struct cxlmi_cmd_memdev_get_health_info health_info;
@@ -252,6 +365,176 @@ int cxl_cmd_get_os_fw_info(struct cxlmi_endpoint *ep) {
     printf("Slot 3 OS Revision: %s\n", fw_info.fw_rev3);
     printf("Slot 4 OS Revision: %s\n", fw_info.fw_rev4);
   }
+
+  return rc;
+}
+
+int cxl_cmd_get_timestamp(struct cxlmi_endpoint *ep) {
+  int rc;
+  struct cxlmi_cmd_get_timestamp ts;
+
+  rc = cxlmi_cmd_get_timestamp(ep, NULL, &ts);
+  if (rc)
+    return rc;
+  else {
+    printf("timestamp: 0x%lx\n", le64_to_cpu(ts.timestamp));
+  }
+
+  return rc;
+}
+
+int cxl_cmd_set_timestamp(struct cxlmi_endpoint *ep, uint64_t timestamp) {
+  int rc;
+  struct cxlmi_cmd_set_timestamp ts;
+
+  ts.timestamp = cpu_to_le64(timestamp);
+  printf("setting timestamp to: 0x%lx\n", le64_to_cpu(ts.timestamp));
+  rc = cxlmi_cmd_set_timestamp(ep, NULL, &ts);
+  if (rc)
+    return rc;
+  else {
+    printf("command completed successfully\n");
+  }
+  return rc;
+}
+
+int cxl_cmd_get_event_records(struct cxlmi_endpoint *ep, uint8_t type) {
+  int rc;
+  struct cxlmi_cmd_get_event_records_rsp *event_records;
+  struct cxlmi_cmd_get_event_records_req event_req;
+  int indent = 2;
+
+  event_records =
+      calloc(1, sizeof(*event_records) + CXL_MAX_RECORDS_TO_DUMP *
+                                             sizeof(struct cxlmi_event_record));
+  if (!event_records) {
+    printf("Failed to allocate memory\r\n");
+    return -ENOMEM;
+  }
+
+  event_req.event_log = type;
+  rc = cxlmi_cmd_get_event_records(ep, NULL, &event_req, event_records);
+  if (!rc) {
+    printf("cxl_dram_event_record size: 0x%lx\n",
+           member_size(struct cxlmi_event_record, data));
+    printf("cxl_memory_module_record size: 0x%lx\n",
+           member_size(struct cxlmi_event_record, data));
+    printf("cxl_event_record size: 0x%lx\n", sizeof(struct cxlmi_event_record));
+    printf("cxl_get_event_record_info size: 0x%lx\n",
+           sizeof(struct cxlmi_cmd_get_event_records_rsp));
+    printf("========= Get Event Records Info : %s =========\n",
+           get_devname(ep));
+    printf("%*sout size: 0x%lx\n", indent, "", sizeof(*event_records));
+    printf("%*sflags: 0x%x\n", indent, "", event_records->flags);
+    printf("%*soverflow_err_cnt: 0x%x\n", indent, "",
+           (event_records->overflow_err_count));
+    printf("%*sfirst_overflow_evt_ts: 0x%lx\n", indent, "",
+           (event_records->first_overflow_timestamp));
+    printf("%*slast_overflow_evt_ts: 0x%lx\n", indent, "",
+           (event_records->last_overflow_timestamp));
+    printf("%*sevent_record_count: 0x%x\n", indent, "",
+           (event_records->record_count));
+
+    for (int rec = 0; rec < event_records->record_count; rec++) {
+      char uuid[40];
+      struct cxlmi_event_record *record = &event_records->records[rec];
+      uuid_unparse(record->uuid, uuid);
+      if (strcmp(uuid, CXL_DRAM_EVENT_GUID) == 0)
+        printf("%*sEvent Record: %d (DRAM guid: %s)\n", indent, "", rec, uuid);
+      else if (strcmp(uuid, CXL_MEM_MODULE_EVENT_GUID) == 0)
+        printf("%*sEvent Record: %d (Memory Module Event guid: %s)\n", indent,
+               "", rec, uuid);
+      else
+        printf("%*sEvent Record: %d (uuid: %s)\n", indent, "", rec, uuid);
+
+      printf("%*sevent_record_length: 0x%x\n", indent + 2, "", record->length);
+      printf("%*sevent_record_flags: 0x%02x%02x%02x\n", indent + 2, "",
+             record->flags[0], record->flags[1], record->flags[2]);
+      printf("%*sevent_record_handle: 0x%x\n", indent + 2, "",
+             le16_to_cpu(record->handle));
+      printf("%*srelated_event_record_handle: 0x%x\n", indent + 2, "",
+             le16_to_cpu(record->related_handle));
+      printf("%*sevent_record_ts: 0x%lx\n", indent + 2, "",
+             le64_to_cpu(record->timestamp));
+
+      /* TODO: Add a loop to print dram event_record data */
+    }
+  }
+
+  free(event_records);
+
+  return rc;
+}
+
+int cxl_cmd_clear_event_records(struct cxlmi_endpoint *ep, uint8_t type,
+                                uint8_t flags, uint16_t handles) {
+  int rc;
+  struct cxlmi_cmd_clear_event_records *event_records;
+  /* TODO: Currently only 1 event_handle can be passed */
+  if (flags) {
+    event_records = calloc(1, sizeof(*event_records));
+    if (!event_records) {
+      printf("Failed to allocate memory\r\n");
+      return -ENOMEM;
+    }
+    event_records->nr_recs = 0;
+  } else {
+    event_records = calloc(1, sizeof(*event_records) + sizeof(uint16_t));
+    if (!event_records) {
+      printf("Failed to allocate memory\r\n");
+      return -ENOMEM;
+    }
+    event_records->nr_recs = 1;
+    event_records->handles[0] = cpu_to_le16(handles);
+  }
+  event_records->event_log = type;
+  rc = cxlmi_cmd_clear_event_records(ep, NULL, event_records);
+  if (!rc) {
+    printf("Clear Event Records command completed successfully\n");
+  }
+
+  free(event_records);
+
+  return rc;
+}
+
+int cxl_cmd_get_event_interrupt_policy(struct cxlmi_endpoint *ep) {
+  int rc;
+  struct cxlmi_cmd_get_event_interrupt_policy event_interrupt_policy;
+
+  rc = cxlmi_cmd_get_event_interrupt_policy(ep, NULL, &event_interrupt_policy);
+  if (!rc) {
+    printf("Get Event Interrupt Policy payload info: %s\n", get_devname(ep));
+    printf("    info_event_log_int_settings: 0x%x\n",
+           event_interrupt_policy.informational_settings);
+    printf("    warning_event_log_int_settings: 0x%x\n",
+           event_interrupt_policy.warning_settings);
+    printf("    failure_event_log_int_settings: 0x%x\n",
+           event_interrupt_policy.warning_settings);
+    printf("    fatal_event_log_int_settings: 0x%x\n",
+           event_interrupt_policy.fatal_settings);
+  }
+
+  return rc;
+}
+
+int cxl_cmd_set_event_interrupt_policy(struct cxlmi_endpoint *ep,
+                                       uint32_t interrupt_policy) {
+  int rc;
+  struct cxlmi_cmd_set_event_interrupt_policy event_interrupt_policy;
+
+  /* below is meant for readability, you don't really need this */
+  interrupt_policy = cpu_to_be32(interrupt_policy);
+  event_interrupt_policy.informational_settings = (interrupt_policy & 0xff);
+  event_interrupt_policy.warning_settings = ((interrupt_policy >> 8) & 0xff);
+  event_interrupt_policy.failure_settings = ((interrupt_policy >> 16) & 0xff);
+  event_interrupt_policy.fatal_settings = ((interrupt_policy >> 24) & 0xff);
+
+  rc = cxlmi_cmd_set_event_interrupt_policy(ep, NULL, &event_interrupt_policy);
+  if (rc)
+    return rc;
+
+  printf("command completed successfully\n");
 
   return rc;
 }

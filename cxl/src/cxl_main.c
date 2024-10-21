@@ -20,11 +20,20 @@
 /* List of support commands and respective handlers */
 struct cmd_struct commands[] = {
     {STR_HELP, cmd_print_help},
+    {STR_IDENTIFY, cmd_identify},
     {STR_GET_SUPPORTED_LOGS, cmd_get_supported_logs},
     {STR_GET_LOG, cmd_get_log},
     {STR_GET_ALERT_CONFIG, cmd_get_alert_config},
+    {STR_SET_ALERT_CONFIG, cmd_set_alert_config},
     {STR_GET_HEALTH_INFO, cmd_get_health_info},
     {STR_GET_FW_INFO, cmd_get_fw_info},
+    {STR_GET_TIMESTAMP, cmd_get_timestamp},
+    {STR_SET_TIMESTAMP, cmd_set_timestamp},
+    {STR_GET_EVENT_RECORDS, cmd_get_event_records},
+    {STR_CLEAR_EVENT_RECORDS, cmd_clear_event_records},
+    {STR_GET_EVENT_INTERRUPT_POLICY, cmd_get_event_interrupt_policy},
+    {STR_SET_EVENT_INTERRUPT_POLICY, cmd_set_event_interrupt_policy},
+
 };
 
 const char cxl_usage_string[] = "cxl COMMAND [ARGS]";
