@@ -30,6 +30,19 @@ enum {
 #define DDR_PAGE_SELECT_GET 0x2B
 };
 
+/* Structure for HBO status */
+struct cxlmi_cmd_hbo_status_out {
+  __le64 bo_status;
+} __attribute__((packed));
+
+struct cxlmi_cmd_hbo_status_fields {
+  uint16_t opcode;
+  uint8_t percent_complete;
+  uint8_t is_running;
+  uint16_t return_code;
+  uint16_t extended_status;
+};
+
 #ifdef __cplusplus
 }
 #endif
