@@ -27,6 +27,7 @@ struct cmd_struct commands[] = {
     {STR_SET_ALERT_CONFIG, cmd_set_alert_config},
     {STR_GET_HEALTH_INFO, cmd_get_health_info},
     {STR_GET_FW_INFO, cmd_get_fw_info},
+    {STR_UPDATE_FW, cmd_update_fw},
     {STR_GET_TIMESTAMP, cmd_get_timestamp},
     {STR_SET_TIMESTAMP, cmd_set_timestamp},
     {STR_GET_EVENT_RECORDS, cmd_get_event_records},

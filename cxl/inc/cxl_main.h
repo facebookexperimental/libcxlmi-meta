@@ -19,6 +19,7 @@ extern "C" {
 #define STR_SET_ALERT_CONFIG "set-alert-config"
 #define STR_GET_HEALTH_INFO "get-health-info"
 #define STR_GET_FW_INFO "get-fw-info"
+#define STR_UPDATE_FW "update-fw"
 #define STR_GET_TIMESTAMP "get-timestamp"
 #define STR_SET_TIMESTAMP "set-timestamp"
 #define STR_GET_EVENT_RECORDS "get-event-records"

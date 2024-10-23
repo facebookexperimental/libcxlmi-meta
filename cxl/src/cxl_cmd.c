@@ -2,9 +2,12 @@
 
 /* std includes */
 #include <errno.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 
 /* libcxlmi includes */
 #include <ccan/endian/endian.h>
+#include <cxlmi/private.h>
 #include <libcxlmi.h>
 
 /* vendor includes */
@@ -365,6 +368,224 @@ int cxl_cmd_get_os_fw_info(struct cxlmi_endpoint *ep) {
     printf("Slot 3 OS Revision: %s\n", fw_info.fw_rev3);
     printf("Slot 4 OS Revision: %s\n", fw_info.fw_rev4);
   }
+
+  return rc;
+}
+
+#define FW_BYTE_ALIGN 128
+#define FW_BLOCK_SIZE 128
+#define INITIATE_TRANSFER 1
+#define CONTINUE_TRANSFER 2
+#define END_TRANSFER 3
+#define ABORT_TRANSFER 4
+
+const char *TRANSFER_FW_ERRORS[15] = {"Success",
+                                      "Background Command Started",
+                                      "Invalid Parameter",
+                                      "Unsupported",
+                                      "Internal Error",
+                                      "Retry Required",
+                                      "Busy",
+                                      "Media Disabled",
+                                      "FW Transfer in Progress",
+                                      "FW Transfer Out of Order",
+                                      "FW Authentication Failed",
+                                      "Invalid Slot",
+                                      "Aborted",
+                                      "Invalid Security State",
+                                      "Invalid Payload Length"};
+
+typedef unsigned char fwblock[FW_BLOCK_SIZE];
+
+int cxl_cmd_update_device_fw(struct cxlmi_endpoint *ep, bool is_os,
+                             struct _update_fw_params *fw_params) {
+  struct stat fileStat;
+  int filesize;
+  int fd;
+  int num_blocks;
+  int num_read;
+  int size;
+  const int max_retries = 10;
+  int retry_count;
+  uint32_t offset;
+  fwblock *rom_buffer;
+  uint32_t opcode;
+  int sleep_time = 1;
+  int percent_to_print = 0;
+  uint16_t std_opcode = ((FIRMWARE_UPDATE << 8) | TRANSFER);
+
+  int rc;
+  FILE *rom;
+
+  /* check file passed and get fw size */
+  rom = fopen(fw_params->filepath, "rb");
+  if (rom == NULL) {
+    printf("Error: File open returned %s\nCould not open file %s\n",
+           strerror(errno), fw_params->filepath);
+    return -ENOENT;
+  }
+
+  printf("Rom filepath: %s\n", fw_params->filepath);
+  fd = fileno(rom);
+  rc = fstat(fd, &fileStat);
+  if (rc != 0) {
+    fclose(rom);
+    return -ENOENT;
+  }
+
+  filesize = fileStat.st_size;
+
+  num_blocks = filesize / FW_BLOCK_SIZE;
+  if (filesize % FW_BLOCK_SIZE != 0) {
+    num_blocks++;
+  }
+
+  /* Allocate mem for FW filesize */
+  rom_buffer = (fwblock *)malloc(filesize);
+  if (!rom_buffer) {
+    printf("Failed to allocate memory\r\n");
+    fclose(rom);
+    return -ENOMEM;
+  }
+
+  num_read = fread(rom_buffer, 1, filesize, rom);
+  if (filesize != num_read) {
+    printf("Number of bytes read: %d\nNumber of bytes expected: %d\n", num_read,
+           num_blocks);
+    free(rom_buffer);
+    fclose(rom);
+    return -ENOENT;
+  }
+
+  offset = 0;
+
+  if (is_os) {
+    printf("firmware update selected for OS Image\n");
+    // Vistara opcode for OS(boot1) image update
+    opcode = ((VENDOR_CMD_OEM_MGMT << 8) | TRANSFER_OS);
+  } else {
+    if (fw_params->hbo) {
+      // Pioneer vendor opcode for hbo-transfer-fw
+      opcode = ((VENDOR_CMD_OEM_MGMT << 8) | TRANSFER_FW);
+    } else {
+      // Spec defined transfer-fw
+      opcode = ((FIRMWARE_UPDATE << 8) | TRANSFER);
+    }
+  }
+
+  struct cxlmi_cmd_transfer_fw *transfer_fw_input = NULL;
+  struct cxlmi_cmd_hbo_status_fields hbo_status;
+
+  /* Trasfer chunks of FW in blocks */
+  for (int i = 0; i < num_blocks; i++) {
+    offset = i * (FW_BLOCK_SIZE / FW_BYTE_ALIGN);
+
+    if ((i * 100) / num_blocks >= percent_to_print) {
+      printf("%d percent complete. Transfering block %d of %d at offset 0x%x\n",
+             percent_to_print, i, num_blocks, offset);
+      percent_to_print = percent_to_print + 10;
+    }
+    size = FW_BLOCK_SIZE;
+    if (i == num_blocks - 1 && filesize % FW_BLOCK_SIZE != 0) {
+      size = filesize % FW_BLOCK_SIZE;
+    }
+
+    transfer_fw_input = calloc(1, sizeof(*transfer_fw_input) + size);
+    if (!transfer_fw_input) {
+      printf("Failed to allocate memory\r\n");
+      rc = -ENOMEM;
+      goto out;
+    }
+
+    if (i == 0)
+      transfer_fw_input->action = INITIATE_TRANSFER;
+    else if (i == num_blocks - 1)
+      transfer_fw_input->action = END_TRANSFER;
+    else
+      transfer_fw_input->action = CONTINUE_TRANSFER;
+    transfer_fw_input->slot = fw_params->slot;
+
+    transfer_fw_input->offset = offset;
+    memcpy(transfer_fw_input->data, &rom_buffer[i], size);
+
+    if (opcode == std_opcode) {
+      rc = cxlmi_cmd_transfer_fw(ep, NULL, transfer_fw_input);
+    } else {
+      rc = cxlmi_cmd_vendor_transfer_fw(ep, NULL, transfer_fw_input, opcode);
+    }
+    retry_count = 0;
+    sleep_time = 10;
+    while (rc != 0) {
+      if (retry_count > max_retries) {
+        printf("Maximum %d retries exceeded while transferring block %d\n",
+               max_retries, i);
+        goto abort;
+      }
+
+      sleep(sleep_time);
+
+      if (opcode == std_opcode) {
+        rc = cxlmi_cmd_transfer_fw(ep, NULL, transfer_fw_input);
+      } else {
+        rc = cxlmi_cmd_vendor_transfer_fw(ep, NULL, transfer_fw_input, opcode);
+      }
+      retry_count++;
+    }
+
+    if (rc != 0) {
+      printf("transfer_fw failed on %d of %d\n", i, num_blocks);
+      goto abort;
+    }
+
+    rc = cxlmi_cmd_get_hbo_status(ep, NULL, &hbo_status);
+    retry_count = 0;
+    sleep_time = 10;
+    while (rc != 0) {
+      if (retry_count > max_retries) {
+        printf("Maximum %d retries exceeded for hbo_status of block %d\n",
+               max_retries, i);
+        goto abort;
+      }
+
+      sleep(sleep_time);
+
+      rc = cxlmi_cmd_get_hbo_status(ep, NULL, &hbo_status);
+      retry_count++;
+    }
+
+    if (rc != 0) {
+      printf("transfer_fw failed on %d of %d\n", i, num_blocks);
+      goto abort;
+    }
+
+    if (fw_params->mock) {
+      goto abort;
+    }
+    if (transfer_fw_input) {
+      free(transfer_fw_input);
+      transfer_fw_input = NULL;
+    }
+  }
+
+  goto out;
+abort:
+  sleep(2.0);
+
+  transfer_fw_input->action = ABORT_TRANSFER;
+  transfer_fw_input->offset = FW_BLOCK_SIZE;
+  if (opcode == std_opcode) {
+    rc = cxlmi_cmd_transfer_fw(ep, NULL, transfer_fw_input);
+  } else {
+    rc = cxlmi_cmd_vendor_transfer_fw(ep, NULL, transfer_fw_input, opcode);
+  }
+
+out:
+  if (transfer_fw_input) {
+    free(transfer_fw_input);
+    transfer_fw_input = NULL;
+  }
+  free(rom_buffer);
+  fclose(rom);
 
   return rc;
 }

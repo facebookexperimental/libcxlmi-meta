@@ -16,6 +16,14 @@ extern "C" {
 /* vendor includes */
 #include <util_main.h>
 
+/* Helper structures */
+struct _update_fw_params {
+  const char *filepath;
+  uint32_t slot;
+  bool hbo;
+  bool mock;
+};
+
 /* shell command handlers  */
 int cmd_print_help(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_identify(int argc, const char **argv, struct cxlmi_ctx *ctx);
@@ -25,6 +33,7 @@ int cmd_get_alert_config(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_set_alert_config(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_get_health_info(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_get_fw_info(int argc, const char **argv, struct cxlmi_ctx *ctx);
+int cmd_update_fw(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_get_timestamp(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_set_timestamp(int argc, const char **argv, struct cxlmi_ctx *ctx);
 int cmd_get_event_records(int argc, const char **argv, struct cxlmi_ctx *ctx);
@@ -48,6 +57,8 @@ int cxl_cmd_get_health_info(struct cxlmi_endpoint *ep);
 int cxl_cmd_get_dev_fw_info(struct cxlmi_endpoint *ep, bool is_os);
 int cxl_cmd_get_fw_info(struct cxlmi_endpoint *ep);
 int cxl_cmd_get_os_fw_info(struct cxlmi_endpoint *ep);
+int cxl_cmd_update_device_fw(struct cxlmi_endpoint *ep, bool is_os,
+                             struct _update_fw_params *fw_params);
 int cxl_cmd_get_timestamp(struct cxlmi_endpoint *ep);
 int cxl_cmd_set_timestamp(struct cxlmi_endpoint *ep, uint64_t timestamp);
 int cxl_cmd_get_event_records(struct cxlmi_endpoint *ep, uint8_t type);

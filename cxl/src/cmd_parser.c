@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 /* std includes */
+#include <errno.h>
 #include <stdlib.h>
 
 /* libcxlmi includes */
@@ -264,6 +265,42 @@ int cmd_get_fw_info(int argc, const char **argv, struct cxlmi_ctx *ctx) {
   int rc =
       cmd_action(argc, argv, ctx, action_cmd_get_fw_info,
                  cmd_get_fw_info_options, STR_CXL_CMDS_HELP(STR_GET_FW_INFO));
+
+  return rc >= 0 ? 0 : EXIT_FAILURE;
+}
+
+/* UPDATE_FW */
+
+struct _update_fw_params update_fw_params;
+
+#define UPDATE_FW_OPTIONS()                                                    \
+  OPT_FILENAME('f', "file", &update_fw_params.filepath, "rom-file",            \
+               "filepath to read ROM for firmware update"),                    \
+      OPT_UINTEGER('s', "slot", &update_fw_params.slot,                        \
+                   "slot to use for firmware loading"),                        \
+      OPT_BOOLEAN('b', "background", &update_fw_params.hbo,                    \
+                  "runs as hidden background option"),                         \
+      OPT_BOOLEAN('m', "mock", &update_fw_params.mock,                         \
+                  "For testing purposes. Mock transfer with only 1 continue "  \
+                  "then abort")
+
+#define FW_IMG_OPTIONS()                                                       \
+  OPT_BOOLEAN('z', "osimage", &fw_img_params.is_os,                            \
+              "select OS(a.k.a boot1) image")
+
+static const struct option cmd_update_fw_options[] = {
+    UPDATE_FW_OPTIONS(),
+    FW_IMG_OPTIONS(),
+    OPT_END(),
+};
+
+static int action_cmd_update_fw(struct cxlmi_endpoint *ep) {
+  return cxl_cmd_update_device_fw(ep, fw_img_params.is_os, &update_fw_params);
+}
+
+int cmd_update_fw(int argc, const char **argv, struct cxlmi_ctx *ctx) {
+  int rc = cmd_action(argc, argv, ctx, action_cmd_update_fw,
+                      cmd_update_fw_options, STR_CXL_CMDS_HELP(STR_UPDATE_FW));
 
   return rc >= 0 ? 0 : EXIT_FAILURE;
 }
