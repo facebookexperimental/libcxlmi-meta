@@ -75,18 +75,39 @@ static int cmd_action(int argc, const char **argv, struct cxlmi_ctx *ctx,
   rc = 0;
   err = 0;
   count = 0;
+  if ((argc == 1) && (strcmp(argv[0], "all") == 0)) {
+    // HACK: Open all the end points
+    argv[0] = "mem0";
+    argv[1] = "mem1";
+    argc = 2;
+  }
+
   for (i = 0; i < argc; i++) {
     if (sscanf(argv[i], "mem%lu", &id) != 1 && strcmp(argv[i], "all") != 0)
       continue;
 
+    // printf("open '%s' endpoint\n", argv[i]);
+    ep = cxlmi_open(ctx, argv[i]);
+    if (!ep) {
+      fprintf(stderr, "cannot open '%s' endpoint\n", argv[i]);
+      continue;
+    }
+
     cxlmi_for_each_endpoint(ctx, ep) {
       if (!cxlmi_ep_filter(ep, argv[i]))
         continue;
+
       rc = action(ep);
       if (rc == 0)
         count++;
       else if (rc && !err)
         err = rc;
+
+      if (ep) {
+        // printf("close '%s' endpoint\n", get_devname(ep));
+        cxlmi_close(ep);
+        ep = NULL;
+      }
     }
   }
 

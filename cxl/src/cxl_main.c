@@ -50,7 +50,6 @@ int cmd_print_help(int argc, const char **argv, struct cxlmi_ctx *ctx) {
 
 int main(int argc, const char **argv) {
   struct cxlmi_ctx *ctx = NULL;
-  struct cxlmi_endpoint *ep = NULL;
   int rc = EXIT_FAILURE;
 
   if (argc < 2) {
@@ -70,18 +69,6 @@ int main(int argc, const char **argv) {
   main_handle_options(&argv, &argc, cxl_usage_string, commands,
                       ARRAY_SIZE(commands));
 
-  /* NOTE: only 1 endpoint, but might add more */
-  if (argc > 1) {
-    if (!strncmp(argv[1], "mem", strlen("mem"))) {
-      /* TODO: Move this logic to cmd_action
-      to support iterating all endpoints like cxlcli tool*/
-      ep = cxlmi_open(ctx, argv[1]);
-      if (!ep) {
-        fprintf(stderr, "cannot open '%s' endpoint\n", argv[1]);
-        goto exit_free_ctx;
-      }
-    }
-  }
   if (argc < 1) {
     cmd_print_help(argc, argv, NULL);
     goto exit_free_ctx;
@@ -89,8 +76,6 @@ int main(int argc, const char **argv) {
 
   main_handle_internal_command(argc, argv, ctx, commands, ARRAY_SIZE(commands));
 
-  if (ep)
-    cxlmi_close(ep);
 exit_free_ctx:
   if (ctx)
     cxlmi_free_ctx(ctx);
