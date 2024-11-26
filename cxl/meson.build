@@ -6,6 +6,12 @@ sources = [
     'src/cxl_main.c',
     'src/cxl_cmd.c',
     'src/cmd_parser.c',
+    'src/dimm_mgmt.c',
+    'src/ltssm_states.c',
+    'src/pcie_eye.c',
+    'src/ddr.c',
+    'src/membridge_err.c',
+    'src/cxl_link.c'
 ]
 
 includes = [
