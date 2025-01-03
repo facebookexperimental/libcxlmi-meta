@@ -1,7 +1,10 @@
 // (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 /* std includes */
+#include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 /* libcxlmi includes */
 #include <ccan/endian/endian.h>
@@ -13,6 +16,63 @@
 #include <vendor_commands.h>
 #include <vendor_types.h>
 
+/* Helper function */
+#define SYSFS_ATTR_SIZE 1024
+
+int read_sysfs_attr(char *path, char *buf) {
+
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  int n;
+  if (!buf) {
+    printf("Null buffer pointer passed\n");
+    return -ENOMEM;
+  }
+
+  if (fd < 0) {
+    printf("failed to open %s: %s\n", path, strerror(errno));
+    return -errno;
+  }
+
+  n = read(fd, buf, SYSFS_ATTR_SIZE);
+  close(fd);
+
+  if (n < 0 || n >= SYSFS_ATTR_SIZE) {
+    buf[0] = 0;
+    printf("failed to read %s: %s\n", path, strerror(errno));
+    return -errno;
+  }
+  buf[n] = 0;
+  if (n && buf[n - 1] == '\n')
+    buf[n - 1] = 0;
+
+  return 0;
+}
+
+#define MAX_PATH_LEN 64
+
+int get_cxl_maxpayload(struct cxlmi_endpoint *ep) {
+  int max_payload;
+
+  char buf[SYSFS_ATTR_SIZE];
+  char path[MAX_PATH_LEN];
+  /* Check if EP is valid */
+  if (!ep) {
+    return -ENODEV;
+  }
+  memset(path, 0x0, MAX_PATH_LEN);
+
+  sprintf(path, "/sys/bus/cxl/devices/%s/payload_max", ep->devname);
+  max_payload = read_sysfs_attr(path, buf);
+
+  /* Valid value present only for success case*/
+  if (max_payload == 0) {
+    max_payload = strtoull(buf, NULL, 0);
+  }
+
+  return (max_payload < 0 ? 0 : max_payload);
+}
+
+/* CXL command implementation */
 CXLMI_EXPORT int cxlmi_cmd_get_os_fw_info(struct cxlmi_endpoint *ep,
                                           struct cxlmi_tunnel_info *ti,
                                           struct cxlmi_cmd_get_fw_info *ret) {
@@ -653,6 +713,8 @@ int cxlmi_cmd_ddr_margin_get(struct cxlmi_endpoint *ep,
                              struct cxlmi_tunnel_info *ti,
                              struct cxlmi_cmd_ddr_margin_get *ret) {
   struct cxlmi_cmd_ddr_margin_get *rsp_pl;
+  int payload_len = sizeof(*rsp_pl);
+  int max_payload_len = get_cxl_maxpayload(ep);
   struct cxlmi_cci_msg req;
   _cleanup_free_ struct cxlmi_cci_msg *rsp = NULL;
   ssize_t rsp_sz;
@@ -662,7 +724,14 @@ int cxlmi_cmd_ddr_margin_get(struct cxlmi_endpoint *ep,
 
   arm_cci_request(ep, &req, 0, VENDOR_CMD_OTHERS, DDR_MARGIN_GET);
 
-  rsp_sz = sizeof(*rsp) + sizeof(*rsp_pl);
+  /* NOTE: This command requires response buffers of larger size.
+  Hence, check for max buffer size and restrict the payload length
+  The max payload is a config from CXL primary mailbox capability */
+  if (payload_len > max_payload_len) {
+    payload_len = max_payload_len;
+  }
+  rsp_sz = sizeof(*rsp) + payload_len;
+
   rsp = calloc(1, rsp_sz);
   if (!rsp)
     return -1;
@@ -672,7 +741,7 @@ int cxlmi_cmd_ddr_margin_get(struct cxlmi_endpoint *ep,
     return rc;
 
   rsp_pl = (struct cxlmi_cmd_ddr_margin_get *)rsp->payload;
-  memcpy(ret, rsp_pl, sizeof(struct cxlmi_cmd_ddr_margin_get));
+  memcpy(ret, rsp_pl, payload_len);
 
   return rc;
 }
