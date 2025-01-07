@@ -1,0 +1,3 @@
+[submodule "libcxlmi"]
+	path = libcxlmi
+	url = https://github.com/computexpresslink/libcxlmi.git
