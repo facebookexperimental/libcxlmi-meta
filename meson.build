@@ -137,6 +137,7 @@ add_project_arguments(
     [
 	'-fomit-frame-pointer',
 	'-D_GNU_SOURCE',
+	'-DSUPPORT_CXL_2_0',
     ],
     language : 'c',
 )
